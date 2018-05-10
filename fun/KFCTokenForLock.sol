@@ -182,8 +182,8 @@ contract KFCToken is BasicToken{
     deadline = now + durationInMinutes * 1 minutes;
     isStartICO=true;
   }
-  
-  
+
+
   //锁仓交易
   function setLockTime(uint _lockMinutes) public onlyOwner {
     lockDeadLine= now + _lockMinutes * 1 minutes;
@@ -194,7 +194,7 @@ contract KFCToken is BasicToken{
     require(_to != address(0));
     require(_value <= balances[msg.sender]);
     balances[msg.sender] = balances[msg.sender].sub(_value);
-    addressToLockedKFC[_to]=_value ;
+    addressToLockedKFC[_to]=addressToLockedKFC[_to].add(_value);
   }
 
 }
