@@ -71,7 +71,8 @@ contract BasicToken is ERC20Basic {
   using SafeMath for uint256;
 
   mapping (address => uint) public addressToLockedKFC;
-  uint public lockDeadLine;
+  uint256 public lockDeadLine;
+  uint256 public fundDeadLine ;
 
   mapping(address => uint256) balances;
 
@@ -84,6 +85,27 @@ contract BasicToken is ERC20Basic {
     return totalSupply_;
   }
 
+  //每个月只能释放自己私募金额的5%
+  //用户私募的总金额
+  mapping (address => uint256) public addressToUserFundTotal;
+
+  uint256 minutesInMonth = 30 * 24 * 60 * 1 minutes;
+
+  //计算私募用户可以提取多少kfc
+  function checkFundUserCanTransfer(address funderAddress)  internal view returns(uint256) {
+      uint256 timeDifferent = now - lockDeadLine;
+      return addressToUserFundTotal[funderAddress]*(timeDifferent / minutesInMonth + 1) / 20 - (addressToUserFundTotal[funderAddress]-addressToLockedKFC[funderAddress]);
+  }
+
+  function getYouCanTransferFund() public view returns(uint256) {
+      if (now > lockDeadLine && addressToLockedKFC[msg.sender]>0){
+          uint256 timeDifferent = now - lockDeadLine;
+      return addressToUserFundTotal[msg.sender]*(timeDifferent / minutesInMonth + 1) / 20 - (addressToUserFundTotal[msg.sender]-addressToLockedKFC[msg.sender]);
+        }else{
+          return 0 ;
+        }
+  }
+
   /**
   * @dev transfer token for a specified address
   * @param _to The address to transfer to.
@@ -92,9 +114,10 @@ contract BasicToken is ERC20Basic {
   function transfer(address _to, uint256 _value) public returns (bool) {
     require(_to != address(0));
     //锁仓结束
-    if (now > lockDeadLine && addressToLockedKFC[msg.sender]>0){
-    	balances[msg.sender]=addressToLockedKFC[msg.sender]+balances[msg.sender];
-    	addressToLockedKFC[msg.sender]=0;
+    if (lockDeadLine != 0 && now > lockDeadLine && now > fundDeadLine && addressToLockedKFC[msg.sender]>0){
+      uint256 canTransfer = checkFundUserCanTransfer(msg.sender);
+      balances[msg.sender]=balances[msg.sender]+canTransfer;
+      addressToLockedKFC[msg.sender]=addressToLockedKFC[msg.sender]-canTransfer;
     }
     require(_value <= balances[msg.sender]);
 
@@ -125,6 +148,12 @@ contract KFCToken is BasicToken{
 
   uint public INITIAL_SUPPLY=1000000000000000000;
 
+  //10% 的私募 
+  uint256 restFund = 10000 ether;
+  //30%  的ico
+  uint256 restICO = 30000 ether;
+  
+  
 
   address public beneficiary;
   uint public fundingGoal;
@@ -138,16 +167,18 @@ contract KFCToken is BasicToken{
   event GoalReached(address recipient, uint totalAmountRaised);
   event FundTransfer(address backer, uint amount, bool isContribution);
 
+  
 
   function KFCToken(
     address ifSuccessfulSendTo,
     uint szaboCostOfEachKFC) public{
     totalSupply_=INITIAL_SUPPLY;
-    balances[this]=totalSupply_/10*3;
-    balances[msg.sender]=totalSupply_/10*7;
+    balances[this]=totalSupply_/10*4;
+    balances[msg.sender]=totalSupply_/10*6;
     beneficiary = ifSuccessfulSendTo;
     price = szaboCostOfEachKFC * 1 szabo;
     owner=msg.sender;
+    fundDeadLine=now + 4 * 30 * 24 * 60 * 1 minutes;
   }
   // 要求发起者是所属者
   modifier onlyOwner() {
@@ -157,11 +188,18 @@ contract KFCToken is BasicToken{
 
 
   function () payable public{
-      require(isStartICO && now < deadline);
-      uint amount = msg.value;
-      amountRaised += amount;
-      this.transfer(msg.sender, (amount / price)* 10 ** uint256(decimals));
-      emit FundTransfer(msg.sender, (amount / price)* 10 ** uint256(decimals), true);
+    require (now < fundDeadLine);
+    require (restFund > 0);
+    uint amount = msg.value;
+    //记录邀请人的金额
+    restFund-=amount;
+    uint256 _value =  (amount / price)* 10 ** uint256(decimals);
+    //私募限制
+    addressToUserFundTotal[msg.sender] = addressToUserFundTotal[msg.sender].add(_value);
+
+    balances[this] = balances[this].sub(_value);
+    addressToLockedKFC[msg.sender]=addressToLockedKFC[msg.sender].add(_value) ;
+    emit GetFundTokenByEth(address(0),msg.sender,amount);
   }
 
   modifier afterDeadline() { if ((now >= deadline) && isStartICO) _; }
@@ -182,19 +220,69 @@ contract KFCToken is BasicToken{
     deadline = now + durationInMinutes * 1 minutes;
     isStartICO=true;
   }
+  
 
 
+  
   //锁仓交易
   function setLockTime(uint _lockMinutes) public onlyOwner {
-    lockDeadLine= now + _lockMinutes * 1 minutes;
+    lockDeadLine= fundDeadLine + _lockMinutes * 1 minutes ;
   }
 
-  //锁仓交易
-  function transferAndLock(address _to,uint _value) public onlyOwner {
-    require(_to != address(0));
-    require(_value <= balances[msg.sender]);
-    balances[msg.sender] = balances[msg.sender].sub(_value);
-    addressToLockedKFC[_to]=addressToLockedKFC[_to].add(_value);
+  mapping (address => uint256) addressToInviteICOMoney;
+  mapping (address => uint256) addressToInviteFundMoney;
+
+  event GetFundTokenByEth(address inviteAddress,address whoGetToken,uint256 payETh);
+  event GetICOTokenByEth(address inviteAddress,address whoGetToken,uint256 payETh);
+
+
+  //私募交易
+  function getFundToken(address inviteAddress) public payable {
+    require (inviteAddress != address(0));
+    require (now < fundDeadLine);
+    require (restFund > 0);
+    uint amount = msg.value;
+    require (restFund >= amount);
+    
+    //记录邀请人的金额
+    addressToInviteFundMoney[inviteAddress] += amount;
+    restFund-=amount;
+    uint256 _value =  (amount / price)* 10 ** uint256(decimals);
+    //私募限制
+    addressToUserFundTotal[msg.sender] = addressToUserFundTotal[msg.sender].add(_value);
+
+    balances[this] = balances[this].sub(_value);
+    addressToLockedKFC[msg.sender]=addressToLockedKFC[msg.sender].add(_value) ;
+    emit GetFundTokenByEth(inviteAddress,msg.sender,amount);
   }
 
+  function getICOToken(address inviteAddress) public payable {
+    require (inviteAddress != address(0));
+    require(isStartICO && now < deadline);
+    //ico金额要大于已经ico的金额
+    require(fundingGoal>amountRaised);
+    require (restICO > 0);
+    uint amount = msg.value;
+
+    require (fundingGoal >= amount);
+    
+    addressToInviteICOMoney[inviteAddress] += amount;
+    restICO-=amount;
+    amountRaised += amount;
+    //this.transfer(msg.sender, (amount / price)* 10 ** uint256(decimals));
+    uint256 _value =(amount / price)* 10 ** uint256(decimals);
+    balances[this] = balances[this].sub(_value);
+    balances[msg.sender]=balances[msg.sender].add(_value);
+    emit GetICOTokenByEth(inviteAddress,msg.sender,amount);
+  }
+
+  function getICOInviteAmount(address inviteAddress)public view returns(uint256)  {
+    require (inviteAddress != address(0) );
+    return addressToInviteICOMoney[inviteAddress];
+  }
+  function getFundInviteAmount(address inviteAddress)public view returns(uint256)  {
+    require (inviteAddress != address(0) );
+    return addressToInviteFundMoney[inviteAddress];
+  }
+  
 }
