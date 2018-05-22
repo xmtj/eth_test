@@ -155,29 +155,42 @@ contract KFCToken is BasicToken{
   
   
 
-  address public beneficiary;
+  //address public beneficiary;
   uint public fundingGoal;
   uint public amountRaised;
   uint public deadline;
   uint public price;
   // 所属人地址
   address internal owner;
+  address internal CMOAddress;
+  address internal CTOAddress;
+  address internal TeamAddress;
   bool public isStartICO = false;
 
-  event GoalReached(address recipient, uint totalAmountRaised);
-  event FundTransfer(address backer, uint amount, bool isContribution);
+
+  //event GoalReached(address recipient, uint totalAmountRaised);
+  //event FundTransfer(address backer, uint amount, bool isContribution);
 
   
 
   function KFCToken(
-    address ifSuccessfulSendTo,
-    uint szaboCostOfEachKFC) public{
+    //address ifSuccessfulSendTo,
+    uint szaboCostOfEachKFC,
+    address _CTOAddress,
+    address _CMOAddress,
+    address _TeamAddress) public{
     totalSupply_=INITIAL_SUPPLY;
-    balances[this]=totalSupply_/10*4;
-    balances[msg.sender]=totalSupply_/10*6;
-    beneficiary = ifSuccessfulSendTo;
+
+    //beneficiary = ifSuccessfulSendTo;
     price = szaboCostOfEachKFC * 1 szabo;
     owner=msg.sender;
+    CMOAddress=_CMOAddress;
+    CTOAddress=_CTOAddress;
+    TeamAddress=_TeamAddress;
+    balances[this]=totalSupply_/100*40;
+    balances[CMOAddress]=totalSupply_/100*38;
+    addressToLockedKFC[CTOAddress]=totalSupply_/100*10;
+    addressToLockedKFC[TeamAddress]=totalSupply_/100*12;
     fundDeadLine=now + 4 * 30 * 24 * 60 * 1 minutes;
   }
   // 要求发起者是所属者
@@ -202,18 +215,20 @@ contract KFCToken is BasicToken{
     emit GetFundTokenByEth(address(0),msg.sender,amount);
   }
 
-  modifier afterDeadline() { if ((now >= deadline) && isStartICO) _; }
 
-  function safeWithdrawal() afterDeadline public {
-      if ( beneficiary == msg.sender) {
-          if (beneficiary.send(address(this).balance)) {
-              emit FundTransfer(beneficiary, amountRaised, false);
-          }
-          isStartICO=false;
-          amountRaised=0;
-          fundingGoal=0;
-          deadline=0;
-      }
+  function safeWithdrawal() onlyOwner public {
+      
+      // if (beneficiary.send(address(this).balance)) {
+      //     emit FundTransfer(beneficiary, amountRaised, false);
+      // }
+      uint256 all = address(this).balance;
+      CTOAddress.transfer(all/10);
+      TeamAddress.transfer(all/100*12);
+      CMOAddress.transfer(all/100*78);
+      isStartICO=false;
+      amountRaised=0;
+      fundingGoal=0;
+      deadline=0;
   }
   function startICO(uint fundingGoalInEthers,uint durationInMinutes) public onlyOwner {
     fundingGoal = fundingGoalInEthers * 1 ether;
